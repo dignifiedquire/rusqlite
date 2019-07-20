@@ -636,7 +636,28 @@ impl Statement<'_> {
                                 s.to_string_lossy(),
                                 e
                             );
-                            panic!("sqlite3_column_text returned non UTF-8 string");
+
+                            // Failed to get a utf8 string, mabye it is utf16?
+                            let text_slice16 = unsafe {
+                                let text = ffi::sqlite3_column_text16(raw, col as c_int);
+                                let len = ffi::sqlite3_column_bytes16(raw, col as c_int);
+                                assert!(
+                                    !text.is_null(),
+                                    "unexpected SQLITE_TEXT column type with NULL data"
+                                );
+
+                                // column_bytes returns the length of the string, need to add 1
+                                // to the length to include to the termination char
+                                std::slice::from_raw_parts(text as *const u16, len as usize + 1)
+                            };
+
+                            eprintln!(
+                                "got utf-16 string: {:?} - lossy: {}",
+                                String::from_utf16(&text_slice16),
+                                String::from_utf16_lossy(&text_slice16)
+                            );
+                            eprintln!("sqlite3_column_text returned non UTF-8 string");
+                            ValueRef::Blob(text_slice)
                         }
                     },
                     Err(e) => {
