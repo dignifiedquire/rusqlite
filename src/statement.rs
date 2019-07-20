@@ -613,20 +613,37 @@ impl Statement<'_> {
                 ValueRef::Real(unsafe { ffi::sqlite3_column_double(raw, col as c_int) })
             }
             ffi::SQLITE_TEXT => {
-                let s = unsafe {
+                let text_slice = unsafe {
                     let text = ffi::sqlite3_column_text(raw, col as c_int);
+                    let len = ffi::sqlite3_column_bytes(raw, col as c_int);
                     assert!(
                         !text.is_null(),
                         "unexpected SQLITE_TEXT column type with NULL data"
                     );
-                    CStr::from_ptr(text as *const c_char)
+
+                    // column_bytes returns the length of the string, need to add 1
+                    // to the length to include to the termination char
+                    std::slice::from_raw_parts(text as *const u8, len as usize + 1)
                 };
 
-                // sqlite3_column_text returns UTF8 data, so our unwrap here should be fine.
-                let s = s
-                    .to_str()
-                    .expect("sqlite3_column_text returned invalid UTF-8");
-                ValueRef::Text(s)
+                match CStr::from_bytes_with_nul(text_slice) {
+                    Ok(s) => match s.to_str() {
+                        Ok(s_utf8) => ValueRef::Text(s_utf8),
+                        Err(e) => {
+                            eprintln!(
+                                "non UTF-8 data {:?}: lossy {}. error {:?}",
+                                text_slice,
+                                s.to_string_lossy(),
+                                e
+                            );
+                            panic!("sqlite3_column_text returned non UTF-8 string");
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("Invalid string: {:?} - {:?}", text_slice, e);
+                        panic!("sqlite3_column_text returned invalid String");
+                    }
+                }
             }
             ffi::SQLITE_BLOB => {
                 let (blob, len) = unsafe {
