@@ -657,7 +657,17 @@ impl Statement<'_> {
                                 String::from_utf16_lossy(&text_slice16)
                             );
                             eprintln!("sqlite3_column_text returned non UTF-8 string");
-                            ValueRef::Blob(text_slice)
+                            let byte_slice = unsafe {
+                                let bytes = ffi::sqlite3_column_blob(raw, col as c_int);
+                                let len = ffi::sqlite3_column_bytes(raw, col as c_int);
+                                assert!(
+                                    !bytes.is_null(),
+                                    "unexpected SQLITE_TEXT column type with NULL data"
+                                );
+
+                                std::slice::from_raw_parts(bytes as *const u8, len as usize)
+                            };
+                            ValueRef::Blob(byte_slice)
                         }
                     },
                     Err(e) => {
